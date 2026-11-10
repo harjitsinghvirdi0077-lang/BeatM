@@ -13,14 +13,17 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -39,8 +42,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -48,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
@@ -99,11 +106,11 @@ object Sfx {
     private val startData by lazy {
         build(
             listOf(
-                Seg(523.0, 523.0, 0, 500, 0.25),
-                Seg(659.0, 659.0, 110, 500, 0.25),
-                Seg(784.0, 784.0, 220, 500, 0.25),
-                Seg(1047.0, 1047.0, 330, 700, 0.25),
-                Seg(200.0, 1200.0, 0, 450, 0.2)
+                Seg(180.0, 1400.0, 0, 700, 0.25),
+                Seg(523.0, 523.0, 250, 600, 0.22),
+                Seg(659.0, 659.0, 380, 600, 0.22),
+                Seg(784.0, 784.0, 510, 600, 0.22),
+                Seg(1047.0, 1047.0, 640, 900, 0.25)
             )
         )
     }
@@ -212,18 +219,30 @@ fun LauncherHome(resumeTick: Int) {
     val listState = rememberLazyListState()
     val intro = remember { Animatable(0f) }
     val launchAnim = remember { Animatable(0f) }
+    val splash = remember { Animatable(0f) }
+    val splashOut = remember { Animatable(0f) }
+    var showSplash by remember { mutableStateOf(true) }
     var launching by remember { mutableStateOf(false) }
-    var firstRun by remember { mutableStateOf(true) }
 
+    // Splash (only when the launcher is opened fresh)
+    LaunchedEffect(Unit) {
+        Sfx.startup()
+        splash.animateTo(1f, tween(1600, easing = LinearOutSlowInEasing))
+        delay(350)
+        splashOut.animateTo(1f, tween(500))
+        showSplash = false
+        intro.snapTo(0f)
+        intro.animateTo(1f, tween(1000, easing = FastOutSlowInEasing))
+    }
+
+    // Coming back from a game: replay the home intro
     LaunchedEffect(resumeTick) {
         launching = false
         launchAnim.snapTo(0f)
-        intro.snapTo(0f)
-        if (firstRun) {
-            firstRun = false
-            Sfx.startup()
+        if (!showSplash) {
+            intro.snapTo(0f)
+            intro.animateTo(1f, tween(1000, easing = FastOutSlowInEasing))
         }
-        intro.animateTo(1f, tween(1000, easing = FastOutSlowInEasing))
     }
 
     LaunchedEffect(idx) { listState.animateScrollToItem(max(idx - 1, 0)) }
@@ -253,41 +272,52 @@ fun LauncherHome(resumeTick: Int) {
                     alpha = intro.value * (1f - 0.9f * l)
                 }
         ) {
-            // Big background themed to the selected game
-            Crossfade(targetState = current, animationSpec = tween(500), label = "bg") { app ->
+            // Full-screen background themed to the selected game (no icon shown)
+            Crossfade(targetState = current, animationSpec = tween(600), label = "bg") { app ->
                 if (app != null) {
-                    Box(Modifier.fillMaxSize()) {
-                        Image(
-                            bitmap = app.art,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .blur(60.dp)
-                                .graphicsLayer { alpha = 0.55f }
-                        )
-                        Image(
-                            bitmap = app.art,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .offset(x = 50.dp)
-                                .size(330.dp)
-                                .graphicsLayer { alpha = 0.4f }
-                                .clip(RoundedCornerShape(64.dp))
-                        )
-                    }
+                    Image(
+                        bitmap = app.art,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = 2f
+                                scaleY = 2f
+                            }
+                            .blur(70.dp)
+                    )
                 }
             }
             Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(
-                        listOf(neon.copy(alpha = 0.30f), Night.copy(alpha = 0.75f), Night)
+                Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        drawRect(
+                            Brush.radialGradient(
+                                colors = listOf(neon.copy(alpha = 0.55f), Color.Transparent),
+                                center = Offset(size.width * 0.75f, size.height * 0.3f),
+                                radius = size.maxDimension * 0.65f
+                            )
+                        )
+                    }
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                neon.copy(alpha = 0.25f),
+                                Color.Transparent,
+                                Night.copy(alpha = 0.85f)
+                            )
+                        )
                     )
-                )
             )
 
-            Column(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 16.dp)) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.displayCutout)
+                    .padding(horizontal = 32.dp, vertical = 16.dp)
+            ) {
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -427,5 +457,45 @@ fun LauncherHome(resumeTick: Int) {
                 }
             }
         )
-    }
-}
+
+        // Splash: BeatM icon animation
+        if (showSplash) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = 1f - splashOut.value }
+                    .background(Brush.radialGradient(listOf(Color(0xFF1B1245), Night)))
+                    .pointerInput(Unit) { detectTapGestures { } },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Canvas(Modifier.size(180.dp)) {
+                        val sc = size.width / 108f
+                        val starts = floatArrayOf(46f, 36f, 26f, 40f, 48f)
+                        val ends = floatArrayOf(62f, 72f, 82f, 68f, 60f)
+                        val cols = listOf(
+                            Color(0xFF00E5FF), Color(0xFF3D8BFF), Color(0xFFB14CFF),
+                            Color(0xFFFF3DDB), Color(0xFFFF7A3D)
+                        )
+                        val rp = splash.value
+                        drawCircle(
+                            color = NeonDefault.copy(alpha = 0.25f * (1f - rp * 0.5f)),
+                            radius = size.minDimension * (0.35f + 0.25f * rp),
+                            style = Stroke(width = 3f)
+                        )
+                        for (i in 0 until 5) {
+                            val p = (splash.value * 1.7f - i * 0.18f).coerceIn(0f, 1f)
+                            val y1 = (54f - (54f - starts[i]) * p) * sc
+                            val y2 = (54f + (ends[i] - 54f) * p) * sc
+                            val x = (30f + 12f * i) * sc
+                            drawLine(
+                                cols[i].copy(alpha = 0.3f),
+                                Offset(x, y1), Offset(x, y2),
+                                strokeWidth = 16f * sc, cap = StrokeCap.Round
+                            )
+                            drawLine(
+                                cols[i],
+                                Offset(x, y1), Offset(x, y2),
+                                strokeWidth = 8f * sc, cap = StrokeCap.Round
+                            )
+            
